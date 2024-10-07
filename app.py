@@ -3,8 +3,14 @@ import paramiko
 import os
 import threading
 import time
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(".env.vault")
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 # Ensure the directory for generated images exists
 if not os.path.exists('static/generated_images'):
@@ -30,30 +36,63 @@ def results():
     images = sorted(os.listdir('static/generated_images'))
     return render_template('results.html', images=images)
 
+@socketio.on('connect')
+def on_connect():
+    # Join a room for the current session
+    join_room('results_room')
+    print('Client connected and joined results_room')
+
+@socketio.on('disconnect')
+def on_disconnect():
+    leave_room('results_room')
+    print('Client disconnected and left results_room')
+
 def generate_images(prompts):
-    hostname = 'your_remote_server'
-    username = 'your_username'
-    password = 'your_password'  # Use SSH keys for better security
+    # Remote paths
+    remote_script = os.getenv('REMOTE_SCRIPT')
+    remote_output_folder = os.getenv('REMOTE_OUTPUT_FOLDER')
+    remote_venv_activate = os.getenv('REMOTE_VENV_ACTIVATE')
+
+    # Remote connection variables
+    gateway = os.getenv('GATEWAY')
+    user = os.getenv('USER')
+    password = os.getenv('PASSWORD')
+    identityfile = os.getenv('IDENTITYFILE')
+    host = os.getenv('HOST')
+    port = os.getenv('PORT')
 
     # Establish SSH connection
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(hostname, username=username, password=password)
+    pkey = paramiko.RSAKey.from_private_key_file(identityfile, password=password)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    gw_client = paramiko.SSHClient()
+    gw_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    gw_client.connect(hostname=gateway, port=port, username=user, password=password, sock=None, pkey=pkey)
+    sock = gw_client.get_transport().open_channel(
+            'direct-tcpip', (host, 22), ('', 0)
+        )
+    client.connect(hostname=host, port=port, username=user, password=password, sock=sock, pkey=pkey)
 
     # Open SFTP session
-    sftp = ssh.open_sftp()
-
-    remote_script = '/path/to/remote/script.py'  # Remote script path
-    remote_output_folder = '/path/to/remote/output_folder'  # Remote output folder
+    sftp = client.open_sftp()
 
     for idx, prompt in enumerate(prompts):
         if prompt.strip():
+            unique_filename = f'image_{idx}_{int(time.time())}.png'
             # Run the remote script with the prompt
-            command = f"accelerate launch {remote_script} --prompt '{prompt}' --output image_{idx}.png"
-            ssh.exec_command(command)
+            # Construct the remote command to source the venv and run the script
+            command = (
+                f"bash -c 'source {remote_venv_activate} && "
+                f"accelerate launch {remote_script} --prompt \"{prompt}\" --output {unique_filename}'"
+            )
+            _, stdout, stderr = client.exec_command(command)
+
+            # For debugging
+            print(stdout.read().decode())
+            print(stderr.read().decode())
 
             # Wait for the image to be generated
-            remote_image_path = f"{remote_output_folder}/image_{idx}.png"
+            remote_image_path = f"{remote_output_folder}/{unique_filename}"
             while True:
                 try:
                     sftp.stat(remote_image_path)
@@ -62,12 +101,19 @@ def generate_images(prompts):
                     time.sleep(1)
 
             # Transfer the image
-            local_image_path = f'static/generated_images/image_{idx}.png'
+            local_image_path = f'static/generated_images/{unique_filename}'
             sftp.get(remote_image_path, local_image_path)
+
+            # Emit socket event to update the interface, including the prompt
+            socketio.emit(
+                'new_image',
+                {'image': unique_filename, 'prompt': prompt},
+                room='results_room'
+            )
 
     # Close connections
     sftp.close()
-    ssh.close()
+    client.close()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True)

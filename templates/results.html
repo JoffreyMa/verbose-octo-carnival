@@ -7,6 +7,10 @@
         .image-container {
             margin-bottom: 20px;
         }
+        .prompt-text {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
         .generated-image {
             width: 100%;
             max-width: 500px;
@@ -16,11 +20,38 @@
 </head>
 <body>
     <h1>Your Generated Comics</h1>
-    {% for image in images %}
-        <div class="image-container">
-            <img src="{{ url_for('static', filename='generated_images/' + image) }}" alt="Generated Image {{ loop.index }}" class="generated-image">
-        </div>
-    {% endfor %}
+    <div id="images">
+        <!-- Images will be displayed here -->
+    </div>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        var socket = io();
+
+        // Listen for the 'new_image' event
+        socket.on('new_image', function(data) {
+            var imagesDiv = document.getElementById('images');
+            var imgContainer = document.createElement('div');
+            imgContainer.className = 'image-container';
+
+            // Create a paragraph element for the prompt
+            var promptPara = document.createElement('p');
+            promptPara.className = 'prompt-text';
+            promptPara.textContent = 'Prompt: ' + data.prompt;
+
+            // Create the image element
+            var img = document.createElement('img');
+            img.src = '/static/generated_images/' + data.image + '?t=' + new Date().getTime();
+            img.className = 'generated-image';
+
+            // Append prompt and image to the container
+            imgContainer.appendChild(promptPara);
+            imgContainer.appendChild(img);
+            imagesDiv.appendChild(imgContainer);
+
+            // Scroll to the new image, aligning it to the center of the viewport
+            img.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    </script>
     <a href="{{ url_for('index') }}">Go Back</a>
 </body>
 </html>

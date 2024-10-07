@@ -130,6 +130,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Exclude environment variables and configuration files
+.env.vault
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -163,3 +166,7 @@ cython_debug/
 
 # Project design
 projet.md
+
+# Draft files
+draft.ipynb
+ssh.ipynb
