@@ -166,7 +166,13 @@ cython_debug/
 
 # Project design
 projet.md
+todo.txt
 
 # Draft files
 draft.ipynb
 ssh.ipynb
+mail.txt
+book_wikipedia_links.csv
+
+# data
+data/
